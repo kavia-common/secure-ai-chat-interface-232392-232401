@@ -105,10 +105,15 @@
 }
 
 .iconBtn {
-  height: 30px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   box-shadow: none;
+}
+
+.item:focus-within {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
 }
 
 .dangerBtn {

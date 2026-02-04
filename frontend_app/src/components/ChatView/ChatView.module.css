@@ -72,6 +72,8 @@
   border-radius: 14px;
   border: 1px solid rgba(17, 24, 39, 0.10);
   background: linear-gradient(180deg, rgba(249, 250, 251, 0.75) 0%, rgba(249, 250, 251, 0.45) 100%);
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
 .msg {
@@ -92,6 +94,35 @@
 
 .msgSystem {
   opacity: 0.95;
+}
+
+@media (max-width: 900px) {
+  .panel {
+    padding: 14px;
+  }
+
+  .messages {
+    padding: 12px;
+  }
+
+  .msg {
+    grid-template-columns: 96px 1fr;
+    gap: 10px;
+  }
+
+  .msgUser {
+    grid-template-columns: 1fr 96px;
+  }
+
+  .actions {
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .input {
+    min-height: 48px; /* touch-friendly */
+  }
 }
 
 .msgMeta {

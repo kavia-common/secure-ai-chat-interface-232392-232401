@@ -53,8 +53,18 @@ textarea {
 }
 
 :focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline: 3px solid rgba(37, 99, 235, 0.65);
   outline-offset: 2px;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* Small set of utility-ish classes for consistent UI */

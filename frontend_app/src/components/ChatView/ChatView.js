@@ -726,6 +726,8 @@ export default function ChatView({ sessionId }) {
                 ? "Backend unreachable; running in local stub mode"
                 : "Streaming attempts: SSE first, then WebSocket fallback"
             }
+            role="status"
+            aria-live="polite"
           >
             <span aria-hidden="true">{isStreaming ? "◉" : "•"}</span>
             <span className="kv-muted">{headerBadge.label}</span>
@@ -747,7 +749,14 @@ export default function ChatView({ sessionId }) {
           </div>
         ) : null}
 
-        <div className={styles.messages} aria-label="Message list" ref={listRef}>
+        <div
+          className={styles.messages}
+          role="log"
+          aria-label="Message list"
+          aria-live={isStreaming ? "polite" : "off"}
+          aria-relevant="additions text"
+          ref={listRef}
+        >
           {messages.length === 0 ? (
             <div className={styles.sessionHint} role="status" aria-live="polite">
               No messages yet. Type below to begin.
@@ -760,11 +769,12 @@ export default function ChatView({ sessionId }) {
             const isSystem = m.role === "system";
 
             return (
-              <div
+              <article
                 key={m.id}
                 className={`${styles.msg} ${isUser ? styles.msgUser : ""} ${isSystem ? styles.msgSystem : ""}`}
+                aria-label={`${m.role} message at ${formatTime(m.createdAt)}`}
               >
-                <div className={styles.msgMeta}>
+                <div className={styles.msgMeta} aria-hidden="true">
                   <div className={styles.role}>{m.role}</div>
                   <div className={styles.time}>{formatTime(m.createdAt)}</div>
                 </div>
@@ -778,9 +788,9 @@ export default function ChatView({ sessionId }) {
 
                   {m.status === "streaming" ? (
                     <div className={styles.typingRow} aria-live="polite" aria-label="Assistant is typing">
-                      <span className={styles.typingDot} />
-                      <span className={styles.typingDot} />
-                      <span className={styles.typingDot} />
+                      <span className={styles.typingDot} aria-hidden="true" />
+                      <span className={styles.typingDot} aria-hidden="true" />
+                      <span className={styles.typingDot} aria-hidden="true" />
                       <span className={styles.typingLabel}>Typing…</span>
                     </div>
                   ) : null}
@@ -797,7 +807,7 @@ export default function ChatView({ sessionId }) {
                     </div>
                   ) : null}
                 </div>
-              </div>
+              </article>
             );
           })}
 

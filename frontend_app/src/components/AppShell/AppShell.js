@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import SessionList from "../SessionList/SessionList";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import styles from "./AppShell.module.css";
 
 /**
@@ -14,31 +15,60 @@ export default function AppShell({ children }) {
   const navigate = useNavigate();
   const params = useParams();
 
+  const mainRef = useRef(/** @type {HTMLElement|null} */ (null));
+  const drawerRef = useRef(/** @type {HTMLElement|null} */ (null));
+  const drawerCloseBtnRef = useRef(/** @type {HTMLButtonElement|null} */ (null));
+
   const activeSessionId = useMemo(() => {
     // Route supports /sessions/:id; root (/) means no specific session.
     return params.id || null;
   }, [params.id]);
 
+  const closeMobileSidebar = () => setIsMobileSidebarOpen(false);
+
   const onSelectSession = (id) => {
     navigate(`/sessions/${id}`);
-    setIsMobileSidebarOpen(false);
+    closeMobileSidebar();
   };
 
   const onNewChat = () => {
     // In later steps this may create a new session. For now route to root.
     navigate(`/`);
-    setIsMobileSidebarOpen(false);
+    closeMobileSidebar();
   };
 
   const isInSessionRoute = location.pathname.startsWith("/sessions/");
 
+  // Focus management on route change: move focus to main region (helps SR + keyboard).
+  useEffect(() => {
+    // Don't steal focus while drawer is open.
+    if (isMobileSidebarOpen) return;
+    mainRef.current?.focus?.();
+  }, [location.pathname, isMobileSidebarOpen]);
+
+  // Trap focus inside the mobile drawer when open; allow Esc to close.
+  useFocusTrap({
+    enabled: isMobileSidebarOpen,
+    containerRef: drawerRef,
+    initialFocusRef: drawerCloseBtnRef,
+    onEscape: closeMobileSidebar
+  });
+
   return (
     <div className={styles.shell}>
+      {/* Skip link for keyboard users */}
+      <a href="#main" className={styles.skipLink}>
+        Skip to chat
+      </a>
+
       <header className={styles.header}>
         <button
           className={`kv-btn ${styles.mobileOnly}`}
           onClick={() => setIsMobileSidebarOpen(true)}
           aria-label="Open sessions sidebar"
+          aria-haspopup="dialog"
+          aria-expanded={isMobileSidebarOpen ? "true" : "false"}
+          aria-controls="mobile-sessions-drawer"
         >
           ☰
         </button>
@@ -70,7 +100,7 @@ export default function AppShell({ children }) {
         </aside>
 
         {/* Main */}
-        <main className={styles.main} aria-label="Chat panel">
+        <main id="main" ref={mainRef} className={styles.main} aria-label="Chat panel" tabIndex={-1}>
           {children}
         </main>
       </div>
@@ -78,16 +108,20 @@ export default function AppShell({ children }) {
       {/* Mobile drawer */}
       {isMobileSidebarOpen ? (
         <>
-          <div
-            className={styles.mobileOverlay}
-            role="presentation"
-            onClick={() => setIsMobileSidebarOpen(false)}
-          />
-          <aside className={styles.mobileDrawer} aria-label="Sessions drawer (mobile)">
+          <div className={styles.mobileOverlay} role="presentation" onClick={closeMobileSidebar} />
+          <aside
+            id="mobile-sessions-drawer"
+            ref={drawerRef}
+            className={styles.mobileDrawer}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Sessions drawer (mobile)"
+          >
             <div className={styles.mobileCloseRow}>
               <button
+                ref={drawerCloseBtnRef}
                 className="kv-btn"
-                onClick={() => setIsMobileSidebarOpen(false)}
+                onClick={closeMobileSidebar}
                 aria-label="Close sessions sidebar"
               >
                 Close
@@ -100,3 +134,4 @@ export default function AppShell({ children }) {
     </div>
   );
 }
+

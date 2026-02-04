@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../Toast/ToastProvider";
 import { useAppActions, useAppState } from "../../state/AppStateContext";
 import styles from "./SessionList.module.css";
@@ -16,6 +16,10 @@ export default function SessionList({ activeSessionId, onSelectSession }) {
   const [editingId, setEditingId] = useState(/** @type {string|null} */ (null));
   const [editingTitle, setEditingTitle] = useState("");
 
+  // Roving focus for session "main" buttons (arrow-key navigation).
+  const itemButtonRefs = useRef(/** @type {Record<string, HTMLButtonElement|null>} */ ({}));
+  const lastFocusedSessionIdRef = useRef(/** @type {string|null} */ (null));
+
   const sortedSessions = useMemo(() => {
     // Keep stable ordering; server/stub already returns newest-first, but ensure deterministic behavior.
     return [...sessions].sort((a, b) => {
@@ -31,25 +35,38 @@ export default function SessionList({ activeSessionId, onSelectSession }) {
   }, []);
 
   const startRename = (s) => {
+    // Remember current focus so we can restore it if rename is cancelled/committed.
+    lastFocusedSessionIdRef.current = s.id;
     setEditingId(s.id);
     setEditingTitle(s.title || "");
   };
 
+  const restoreFocus = (id) => {
+    const btn = itemButtonRefs.current?.[id];
+    btn?.focus?.();
+  };
+
   const cancelRename = () => {
+    const id = editingId;
     setEditingId(null);
     setEditingTitle("");
+    if (id) restoreFocus(id);
   };
 
   const commitRename = async (id) => {
     const newTitle = editingTitle.trim();
     if (!newTitle) return;
 
-    cancelRename();
+    setEditingId(null);
+    setEditingTitle("");
+
     try {
       await actions.renameSession(id, { title: newTitle });
       toast.notify({ tone: "success", title: "Session updated", message: "Renamed successfully." });
+      restoreFocus(id);
     } catch (e) {
       toast.notify({ tone: "error", title: "Rename failed", message: e?.message || "Unable to rename this session." });
+      restoreFocus(id);
     }
   };
 
@@ -143,12 +160,36 @@ export default function SessionList({ activeSessionId, onSelectSession }) {
                 className={`${styles.item} ${active ? styles.itemActive : ""} ${busy ? styles.itemBusy : ""}`}
               >
                 <button
+                  ref={(el) => {
+                    itemButtonRefs.current[s.id] = el;
+                  }}
                   type="button"
                   className={styles.itemMain}
                   onClick={() => onSelectSession?.(s.id)}
                   aria-current={active ? "page" : undefined}
+                  aria-label={`Open session ${s.title}`}
                   disabled={editing}
                   title={s.title}
+                  onFocus={() => {
+                    lastFocusedSessionIdRef.current = s.id;
+                  }}
+                  onKeyDown={(e) => {
+                    // Arrow navigation between sessions for keyboard users.
+                    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+                    e.preventDefault();
+
+                    const ids = sortedSessions.map((x) => x.id);
+                    const currentIndex = Math.max(0, ids.indexOf(s.id));
+                    let nextIndex = currentIndex;
+
+                    if (e.key === "ArrowDown") nextIndex = Math.min(ids.length - 1, currentIndex + 1);
+                    if (e.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+                    if (e.key === "Home") nextIndex = 0;
+                    if (e.key === "End") nextIndex = ids.length - 1;
+
+                    const nextId = ids[nextIndex];
+                    itemButtonRefs.current?.[nextId]?.focus?.();
+                  }}
                 >
                   {editing ? (
                     <span className={styles.srOnly}>Editing session title</span>
@@ -163,7 +204,7 @@ export default function SessionList({ activeSessionId, onSelectSession }) {
                   )}
                 </button>
 
-                <div className={styles.itemActions}>
+                <div className={styles.itemActions} aria-label={`Actions for ${s.title}`}>
                   {editing ? (
                     <>
                       <input
@@ -220,3 +261,4 @@ export default function SessionList({ activeSessionId, onSelectSession }) {
     </div>
   );
 }
+
