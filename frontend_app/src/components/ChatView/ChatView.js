@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createApiClient } from "../../lib/api/client";
+import { useToast } from "../Toast/ToastProvider";
+import { useAuth } from "../../auth/AuthContext";
+import { useAppActions, useAppState } from "../../state/AppStateContext";
 import styles from "./ChatView.module.css";
-
-const api = createApiClient();
 
 /**
  * @typedef {"system"|"user"|"assistant"} Role
@@ -126,16 +126,28 @@ function parseStreamEvent(dataText) {
  * PUBLIC_INTERFACE
  */
 export default function ChatView({ sessionId }) {
-  const [messages, setMessages] = useState(/** @type {ChatMessage[]} */ ([]));
+  const toast = useToast();
+  const { api } = useAuth();
+  const appState = useAppState();
+  const appActions = useAppActions();
+
+  // Ensure per-session message bucket exists + seeded baseline
+  useEffect(() => {
+    appActions.ensureSessionMessagesSeeded(sessionId);
+    appActions.setActiveSessionId(sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  const messagesKey = sessionId || "__root__";
+  const messageBucket = appState.messagesBySession[messagesKey] || { items: [], status: "idle", errorText: "" };
+  const messages = messageBucket.items;
+
   const [composerText, setComposerText] = useState("");
-  const [status, setStatus] = useState(
-    /** @type {"idle"|"streaming"|"error"} */ ("idle")
-  );
+  const [status, setStatus] = useState(/** @type {"idle"|"streaming"|"error"} */ ("idle"));
   const [errorText, setErrorText] = useState("");
   const [transport, setTransport] = useState(/** @type {"SSE"|"WS"|"STUB"} */ ("SSE"));
 
   const [lastUserText, setLastUserText] = useState("");
-  const [lastSessionId, setLastSessionId] = useState(sessionId);
 
   /** Attachment composer state */
   const [attachments, setAttachments] = useState(/** @type {AttachmentItem[]} */ ([]));
@@ -171,43 +183,16 @@ export default function ChatView({ sessionId }) {
     };
   }, []);
 
-  // Load/seed messages when session changes. (No backend assumptions; use lightweight stub state.)
+  // When session changes, reset only UI-level state; message history is maintained in global store.
   useEffect(() => {
     setErrorText("");
     setStatus("idle");
+    setLastUserText("");
 
     // Cancel any in-flight stream when switching sessions.
     streamCancelRef.current?.();
     streamCancelRef.current = null;
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
-
-    setLastSessionId(sessionId);
-
-    const now = new Date().toISOString();
-    if (!sessionId) {
-      setMessages([
-        {
-          id: makeId(),
-          role: "system",
-          content: "Start a new chat. Your messages will stream in real time when the backend is available.",
-          createdAt: now,
-          status: "final"
-        }
-      ]);
-      return;
-    }
-
-    // In lieu of a dedicated "get messages" endpoint (not yet abstracted in ApiClient),
-    // show a small session banner message and keep the rest in-memory for this view.
-    setMessages([
-      {
-        id: makeId(),
-        role: "system",
-        content: `Viewing session: ${sessionId}`,
-        createdAt: now,
-        status: "final"
-      }
-    ]);
   }, [sessionId]);
 
   // Auto-scroll to bottom on message updates (only when near bottom already).
@@ -240,11 +225,11 @@ export default function ChatView({ sessionId }) {
   const canSend = composerText.trim().length > 0 && !isStreaming && !hasBlockingUploads && !hasBlockingErrors;
 
   const appendMessage = (msg) => {
-    setMessages((cur) => [...cur, msg]);
+    appActions.appendMessage(sessionId, msg);
   };
 
   const updateMessage = (id, patch) => {
-    setMessages((cur) => cur.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    appActions.updateMessage(sessionId, id, patch);
   };
 
   /**
@@ -456,13 +441,9 @@ export default function ChatView({ sessionId }) {
       setStatus("error");
       setErrorText("Streaming timed out. You can Retry, or continue in stub mode.");
       // Mark streaming assistant message as errored (if present)
-      setMessages((cur) => {
-        const last = [...cur].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
-        if (!last) return cur;
-        return cur.map((m) =>
-          m.id === last.id ? { ...m, status: "error", errorText: "Timeout while waiting for stream." } : m
-        );
-      });
+      const cur = appState.messagesBySession[messagesKey]?.items || [];
+      const last = [...cur].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
+      if (last) updateMessage(last.id, { status: "error", errorText: "Timeout while waiting for stream." });
 
       streamCancelRef.current?.();
       streamCancelRef.current = null;
@@ -476,14 +457,13 @@ export default function ChatView({ sessionId }) {
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
 
     // Mark last streaming assistant message cancelled.
-    setMessages((cur) => {
-      const last = [...cur].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
-      if (!last) return cur;
-      return cur.map((m) => (m.id === last.id ? { ...m, status: "cancelled" } : m));
-    });
+    const cur = appState.messagesBySession[messagesKey]?.items || [];
+    const last = [...cur].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
+    if (last) updateMessage(last.id, { status: "cancelled" });
 
     setStatus("idle");
     setErrorText("");
+    toast.notify({ tone: "info", title: "Cancelled", message: "Generation stopped." });
   };
 
   /**
@@ -535,6 +515,7 @@ export default function ChatView({ sessionId }) {
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     updateMessage(assistantId, { status: "final" });
     setStatus("idle");
+    toast.notify({ tone: "info", title: "Stub mode", message: "Backend unreachable; showing local fallback response." });
   };
 
   /**
@@ -618,9 +599,10 @@ export default function ChatView({ sessionId }) {
             return;
           }
           if (evt.text) {
-            setMessages((cur) =>
-              cur.map((m) => (m.id === assistantId ? { ...m, content: (m.content || "") + evt.text } : m))
-            );
+            const current = appState.messagesBySession[messagesKey]?.items || [];
+            const target = current.find((m) => m.id === assistantId);
+            const existing = target?.content || "";
+            updateMessage(assistantId, { content: `${existing}${evt.text}` });
           }
         },
         onError: () => {
@@ -656,9 +638,10 @@ export default function ChatView({ sessionId }) {
             return;
           }
           if (evt.text) {
-            setMessages((cur) =>
-              cur.map((m) => (m.id === assistantId ? { ...m, content: (m.content || "") + evt.text } : m))
-            );
+            const current = appState.messagesBySession[messagesKey]?.items || [];
+            const target = current.find((m) => m.id === assistantId);
+            const existing = target?.content || "";
+            updateMessage(assistantId, { content: `${existing}${evt.text}` });
           }
         },
         shouldReconnect: () => false,
@@ -765,6 +748,12 @@ export default function ChatView({ sessionId }) {
         ) : null}
 
         <div className={styles.messages} aria-label="Message list" ref={listRef}>
+          {messages.length === 0 ? (
+            <div className={styles.sessionHint} role="status" aria-live="polite">
+              No messages yet. Type below to begin.
+            </div>
+          ) : null}
+
           {messages.map((m) => {
             const isUser = m.role === "user";
             const isAssistant = m.role === "assistant";
