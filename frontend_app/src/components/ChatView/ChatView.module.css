@@ -233,6 +233,179 @@
   gap: 10px;
 }
 
+.dropZone {
+  border-radius: 14px;
+  border: 1px dashed rgba(17, 24, 39, 0.20);
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.dropZone:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+.dropZoneActive {
+  border-color: rgba(37, 99, 235, 0.65);
+  background: rgba(37, 99, 235, 0.05);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
+}
+
+.dropZoneTitle {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.dropZoneSub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.dropZoneLink {
+  color: rgba(37, 99, 235, 0.95);
+  font-weight: 700;
+}
+
+.fileInput {
+  display: none;
+}
+
+.uploadSummary {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+  color: rgba(17, 24, 39, 0.75);
+  font-size: 12px;
+}
+
+.attachments {
+  border-radius: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.10);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+}
+
+.attachmentsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.attachmentsTitle {
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.attachmentsMeta {
+  color: var(--color-muted);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.attachmentList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachmentItem {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.attachmentMain {
+  min-width: 0;
+}
+
+.attachmentName {
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentMeta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.progressRow {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.progressTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.10);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: rgba(37, 99, 235, 0.75);
+  border-radius: 999px;
+  width: 0%;
+  transition: width 120ms ease;
+}
+
+.progressPct {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(17, 24, 39, 0.7);
+}
+
+.attachmentActions {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.attachmentOk {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.65);
+}
+
+.attachmentWarn {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(180, 83, 9, 0.95);
+}
+
+.attachmentError {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(127, 29, 29, 0.95);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+}
+
 .composerTop {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -298,7 +471,8 @@
 }
 
 .onlinePill,
-.offlinePill {
+.offlinePill,
+.queuePill {
   display: inline-flex;
   align-items: center;
   padding: 2px 10px;
@@ -318,6 +492,12 @@
   border: 1px solid rgba(245, 158, 11, 0.25);
   background: rgba(245, 158, 11, 0.08);
   color: rgba(17, 24, 39, 0.7);
+}
+
+.queuePill {
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  background: rgba(17, 24, 39, 0.04);
+  color: rgba(17, 24, 39, 0.72);
 }
 
 @media (max-width: 560px) {

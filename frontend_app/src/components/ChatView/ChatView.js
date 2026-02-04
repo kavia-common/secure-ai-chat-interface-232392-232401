@@ -6,13 +6,36 @@ const api = createApiClient();
 
 /**
  * @typedef {"system"|"user"|"assistant"} Role
+ *
+ * @typedef {{
+ *   id: string,
+ *   fileName: string,
+ *   size: number,
+ *   mimeType: string,
+ *   createdAt: string,
+ *   url?: string
+ * }} UploadedFile
+ *
+ * @typedef {{
+ *   clientId: string,
+ *   file: File,
+ *   status: "queued"|"uploading"|"done"|"error"|"cancelled",
+ *   progress: number,
+ *   loaded: number,
+ *   total: number,
+ *   errorText?: string,
+ *   upload?: UploadedFile,
+ *   cancel?: () => void
+ * }} AttachmentItem
+ *
  * @typedef {{
  *   id: string,
  *   role: Role,
  *   content: string,
  *   createdAt: string,
  *   status?: "final"|"streaming"|"error"|"cancelled",
- *   errorText?: string
+ *   errorText?: string,
+ *   attachments?: UploadedFile[]
  * }} ChatMessage
  */
 
@@ -22,6 +45,28 @@ const api = createApiClient();
  */
 function makeId() {
   return `m-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
+/**
+ * Create a stable-ish attachment id without external deps.
+ * @returns {string}
+ */
+function makeAttachmentId() {
+  return `a-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
+/**
+ * Pretty bytes helper.
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatBytes(bytes) {
+  const b = Number(bytes || 0);
+  if (!Number.isFinite(b) || b <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const idx = Math.min(units.length - 1, Math.floor(Math.log(b) / Math.log(1024)));
+  const val = b / 1024 ** idx;
+  return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
 /**
@@ -91,6 +136,23 @@ export default function ChatView({ sessionId }) {
 
   const [lastUserText, setLastUserText] = useState("");
   const [lastSessionId, setLastSessionId] = useState(sessionId);
+
+  /** Attachment composer state */
+  const [attachments, setAttachments] = useState(/** @type {AttachmentItem[]} */ ([]));
+  const [isDropActive, setIsDropActive] = useState(false);
+  const [uploadSummaryText, setUploadSummaryText] = useState("");
+
+  // Validation rules (frontend-only; backend still enforces its own)
+  const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
+  const MAX_FILES = 10;
+  const ALLOWED_MIME_PREFIXES = ["image/", "text/"];
+  const ALLOWED_EXACT_MIMES = [
+    "application/pdf",
+    "application/json",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ];
+
+  const fileInputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
 
   const streamCancelRef = useRef(/** @type {null | (() => void)} */ (null));
   const streamTimeoutRef = useRef(/** @type {any} */ (null));
@@ -164,7 +226,18 @@ export default function ChatView({ sessionId }) {
     return { label: `Ready (${transport})`, tone: "neutral" };
   }, [isStreaming, transport]);
 
-  const canSend = composerText.trim().length > 0 && !isStreaming;
+  const uploadStats = useMemo(() => {
+    const total = attachments.length;
+    const uploading = attachments.filter((a) => a.status === "uploading" || a.status === "queued").length;
+    const done = attachments.filter((a) => a.status === "done").length;
+    const errored = attachments.filter((a) => a.status === "error").length;
+    return { total, uploading, done, errored };
+  }, [attachments]);
+
+  const hasBlockingUploads = uploadStats.uploading > 0;
+  const hasBlockingErrors = uploadStats.errored > 0;
+
+  const canSend = composerText.trim().length > 0 && !isStreaming && !hasBlockingUploads && !hasBlockingErrors;
 
   const appendMessage = (msg) => {
     setMessages((cur) => [...cur, msg]);
@@ -172,6 +245,204 @@ export default function ChatView({ sessionId }) {
 
   const updateMessage = (id, patch) => {
     setMessages((cur) => cur.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  };
+
+  /**
+   * Validate a file against basic constraints.
+   * @param {File} file
+   * @returns {string|null} error text or null
+   */
+  const validateFile = (file) => {
+    if (!file) return "Invalid file.";
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return `File is too large (${formatBytes(file.size)}). Max is ${formatBytes(MAX_FILE_SIZE_BYTES)}.`;
+    }
+
+    const type = file.type || "";
+    const okByPrefix = ALLOWED_MIME_PREFIXES.some((p) => type.startsWith(p));
+    const okByExact = ALLOWED_EXACT_MIMES.includes(type);
+
+    // If browser doesn't know the MIME type, allow but warn by name.
+    if (!type) return null;
+
+    if (!okByPrefix && !okByExact) {
+      return `Unsupported file type (${type}).`;
+    }
+    return null;
+  };
+
+  /**
+   * Start uploading a specific attachment.
+   * @param {string} clientId
+   * @param {File} file
+   */
+  const startUpload = async (clientId, file) => {
+    setAttachments((cur) =>
+      cur.map((a) =>
+        a.clientId === clientId
+          ? {
+              ...a,
+              status: "uploading",
+              progress: 0,
+              loaded: 0,
+              total: file.size || 0,
+              errorText: ""
+            }
+          : a
+      )
+    );
+
+    try {
+      const { upload, cancel } = await api.uploadFile(file, {
+        onProgress: ({ loaded, total, percent }) => {
+          if (!mountedRef.current) return;
+          setAttachments((cur) =>
+            cur.map((a) =>
+              a.clientId === clientId
+                ? {
+                    ...a,
+                    loaded,
+                    total,
+                    progress: Math.max(0, Math.min(100, Number(percent || 0)))
+                  }
+                : a
+            )
+          );
+        }
+      });
+
+      if (!mountedRef.current) return;
+
+      setAttachments((cur) =>
+        cur.map((a) =>
+          a.clientId === clientId
+            ? {
+                ...a,
+                status: "done",
+                upload,
+                cancel,
+                progress: 100,
+                loaded: a.total || file.size || 0,
+                total: a.total || file.size || 0
+              }
+            : a
+        )
+      );
+    } catch (e) {
+      if (!mountedRef.current) return;
+
+      const msg = e?.message || "Upload failed.";
+      const cancelled = String(msg).toLowerCase().includes("cancel");
+      setAttachments((cur) =>
+        cur.map((a) =>
+          a.clientId === clientId
+            ? {
+                ...a,
+                status: cancelled ? "cancelled" : "error",
+                errorText: msg
+              }
+            : a
+        )
+      );
+    }
+  };
+
+  /**
+   * Add selected/dropped files to the queue (with validation).
+   * @param {FileList|File[]} filesLike
+   */
+  const addFiles = async (filesLike) => {
+    const arr = Array.from(filesLike || []);
+    if (!arr.length) return;
+
+    setUploadSummaryText("");
+
+    // Enforce max count against existing.
+    const existingCount = attachments.length;
+    const allowed = Math.max(0, MAX_FILES - existingCount);
+    const toConsider = arr.slice(0, allowed);
+
+    const rejectedCount = arr.length - toConsider.length;
+    if (rejectedCount > 0) {
+      setUploadSummaryText(`Only ${MAX_FILES} attachments allowed. ${rejectedCount} file(s) were ignored.`);
+    }
+
+    /** @type {AttachmentItem[]} */
+    const newItems = [];
+    for (const f of toConsider) {
+      const err = validateFile(f);
+      if (err) {
+        newItems.push({
+          clientId: makeAttachmentId(),
+          file: f,
+          status: "error",
+          progress: 0,
+          loaded: 0,
+          total: f.size || 0,
+          errorText: err
+        });
+      } else {
+        newItems.push({
+          clientId: makeAttachmentId(),
+          file: f,
+          status: "queued",
+          progress: 0,
+          loaded: 0,
+          total: f.size || 0
+        });
+      }
+    }
+
+    if (!newItems.length) return;
+
+    // Add to state first.
+    setAttachments((cur) => [...cur, ...newItems]);
+
+    // Start uploads for valid items (queued).
+    for (const item of newItems) {
+      if (item.status === "queued") {
+        // eslint-disable-next-line no-await-in-loop
+        await startUpload(item.clientId, item.file);
+      }
+    }
+  };
+
+  const removeAttachment = async (clientId) => {
+    const target = attachments.find((a) => a.clientId === clientId);
+    if (!target) return;
+
+    // Attempt to cancel in-flight upload.
+    if (target.status === "uploading") {
+      try {
+        target.cancel?.();
+      } catch {
+        // ignore
+      }
+    }
+
+    // If already uploaded, best-effort delete on backend/stub.
+    if (target.status === "done" && target.upload?.id) {
+      try {
+        await api.deleteUpload(target.upload.id);
+      } catch {
+        // ignore; UI remove should still succeed
+      }
+    }
+
+    setAttachments((cur) => cur.filter((a) => a.clientId !== clientId));
+  };
+
+  const cancelAttachmentUpload = (clientId) => {
+    const target = attachments.find((a) => a.clientId === clientId);
+    if (!target) return;
+    try {
+      target.cancel?.();
+    } catch {
+      // ignore
+    }
+    setAttachments((cur) =>
+      cur.map((a) => (a.clientId === clientId ? { ...a, status: "cancelled", errorText: "Cancelled" } : a))
+    );
   };
 
   const startStreamTimeout = () => {
@@ -282,14 +553,22 @@ export default function ChatView({ sessionId }) {
     setLastUserText(userText);
     setErrorText("");
 
+    const successfulUploads = attachments
+      .filter((a) => a.status === "done" && a.upload && a.upload.id)
+      .map((a) => a.upload);
+
     const userMsg = {
       id: makeId(),
       role: "user",
       content: userText,
       createdAt: new Date().toISOString(),
-      status: "final"
+      status: "final",
+      attachments: successfulUploads
     };
     appendMessage(userMsg);
+
+    // Clear composer attachments once message is accepted into the timeline.
+    setAttachments([]);
 
     const assistantId = makeId();
     appendMessage({
@@ -319,7 +598,13 @@ export default function ChatView({ sessionId }) {
         method: "POST",
         body: {
           sessionId: sessionId || null,
-          message: userText
+          message: userText,
+          attachments: successfulUploads.map((u) => ({
+            id: u.id,
+            fileName: u.fileName,
+            size: u.size,
+            mimeType: u.mimeType
+          }))
         },
         onOpen: () => {
           // no-op
@@ -385,7 +670,13 @@ export default function ChatView({ sessionId }) {
         JSON.stringify({
           type: "chat",
           sessionId: sessionId || null,
-          message: userText
+          message: userText,
+          attachments: successfulUploads.map((u) => ({
+            id: u.id,
+            fileName: u.fileName,
+            size: u.size,
+            mimeType: u.mimeType
+          }))
         })
       );
 
@@ -530,6 +821,161 @@ export default function ChatView({ sessionId }) {
       </div>
 
       <div className={`${styles.composer} kv-surface`} aria-label="Message composer">
+        <div
+          className={`${styles.dropZone} ${isDropActive ? styles.dropZoneActive : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-label="Attach files: drag and drop files here, or press Enter to choose files"
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDropActive(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDropActive(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDropActive(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDropActive(false);
+            const files = e.dataTransfer?.files;
+            if (files && files.length) addFiles(files);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <div className={styles.dropZoneTitle}>Drag & drop files to attach</div>
+          <div className={styles.dropZoneSub}>
+            or <span className={styles.dropZoneLink}>choose files</span> (up to {MAX_FILES}, max{" "}
+            {formatBytes(MAX_FILE_SIZE_BYTES)} each)
+          </div>
+
+          <input
+            ref={fileInputRef}
+            className={styles.fileInput}
+            type="file"
+            multiple
+            onChange={(e) => {
+              const files = e.target.files;
+              if (files && files.length) addFiles(files);
+              // Allow selecting the same file again.
+              e.target.value = "";
+            }}
+            aria-label="Choose files to upload"
+          />
+        </div>
+
+        {uploadSummaryText ? (
+          <div className={styles.uploadSummary} role="status" aria-live="polite">
+            {uploadSummaryText}
+          </div>
+        ) : null}
+
+        {attachments.length ? (
+          <div className={styles.attachments} aria-label="Attachments">
+            <div className={styles.attachmentsHeader}>
+              <div className={styles.attachmentsTitle}>
+                Attachments
+                {uploadStats.uploading > 0 ? (
+                  <span className={styles.attachmentsMeta}> • Uploading…</span>
+                ) : uploadStats.errored > 0 ? (
+                  <span className={styles.attachmentsMeta}> • Fix errors to send</span>
+                ) : (
+                  <span className={styles.attachmentsMeta}> • Ready</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="kv-btn"
+                onClick={() => setAttachments([])}
+                aria-label="Clear all attachments"
+                title="Clear all attachments"
+                disabled={attachments.some((a) => a.status === "uploading")}
+              >
+                Clear
+              </button>
+            </div>
+
+            <ul className={styles.attachmentList}>
+              {attachments.map((a) => (
+                <li key={a.clientId} className={styles.attachmentItem}>
+                  <div className={styles.attachmentMain}>
+                    <div className={styles.attachmentName} title={a.file.name}>
+                      {a.file.name}
+                    </div>
+                    <div className={styles.attachmentMeta}>
+                      {formatBytes(a.file.size)} • {a.file.type || "unknown type"}
+                    </div>
+
+                    {a.status === "uploading" || a.status === "queued" ? (
+                      <div className={styles.progressRow} aria-label={`Upload progress for ${a.file.name}`}>
+                        <div className={styles.progressTrack} aria-hidden="true">
+                          <div className={styles.progressFill} style={{ width: `${a.progress || 0}%` }} />
+                        </div>
+                        <div className={styles.progressPct}>{a.progress || 0}%</div>
+                      </div>
+                    ) : null}
+
+                    {a.status === "done" && a.upload?.id ? (
+                      <div className={styles.attachmentOk} role="status">
+                        Uploaded • ID: <span className={styles.mono}>{a.upload.id}</span>
+                      </div>
+                    ) : null}
+
+                    {a.status === "cancelled" ? (
+                      <div className={styles.attachmentWarn} role="status">
+                        Cancelled
+                      </div>
+                    ) : null}
+
+                    {a.status === "error" && a.errorText ? (
+                      <div className={styles.attachmentError} role="status">
+                        {a.errorText}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className={styles.attachmentActions}>
+                    {a.status === "uploading" ? (
+                      <button
+                        type="button"
+                        className="kv-btn"
+                        onClick={() => cancelAttachmentUpload(a.clientId)}
+                        aria-label={`Cancel upload for ${a.file.name}`}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      className="kv-btn"
+                      onClick={() => removeAttachment(a.clientId)}
+                      aria-label={`Remove attachment ${a.file.name}`}
+                      title="Remove attachment"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className={styles.composerTop}>
           <textarea
             className={styles.input}
@@ -538,6 +984,7 @@ export default function ChatView({ sessionId }) {
             placeholder={isStreaming ? "Streaming response… (Cancel available)" : "Type a message…"}
             rows={1}
             disabled={false}
+            aria-label="Message text"
             onKeyDown={(e) => {
               // Enter to send, Shift+Enter for newline
               if (e.key === "Enter" && !e.shiftKey) {
@@ -556,6 +1003,15 @@ export default function ChatView({ sessionId }) {
               <>
                 <button
                   className="kv-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Add attachments"
+                  title="Add attachments"
+                  disabled={attachments.length >= MAX_FILES}
+                >
+                  Attach
+                </button>
+                <button
+                  className="kv-btn"
                   onClick={onRetry}
                   disabled={!lastUserText}
                   aria-label="Retry last message"
@@ -568,7 +1024,15 @@ export default function ChatView({ sessionId }) {
                   onClick={onSend}
                   disabled={!canSend}
                   aria-label="Send message"
-                  title={canSend ? "Send" : "Type a message to send"}
+                  title={
+                    canSend
+                      ? "Send"
+                      : hasBlockingUploads
+                        ? "Wait for uploads to finish"
+                        : hasBlockingErrors
+                          ? "Remove or fix attachment errors"
+                          : "Type a message to send"
+                  }
                 >
                   Send
                 </button>
@@ -583,6 +1047,11 @@ export default function ChatView({ sessionId }) {
             <span className={styles.kbd}>Enter</span> for newline
           </span>
           <span className={styles.footerRight}>
+            {uploadStats.total ? (
+              <span className={styles.queuePill} title="Attachment queue status">
+                {uploadStats.done}/{uploadStats.total} uploaded
+              </span>
+            ) : null}
             {transport === "STUB" ? (
               <span className={styles.offlinePill}>Offline mode</span>
             ) : (
