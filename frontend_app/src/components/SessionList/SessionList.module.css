@@ -10,12 +10,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
 }
 
 .title {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.2px;
+}
+
+.newBtn {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .list {
@@ -28,15 +35,14 @@
 }
 
 .item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
   padding: 10px 10px;
   border-radius: 12px;
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.75);
-  cursor: pointer;
-  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease, opacity 120ms ease;
 }
 
 .item:hover {
@@ -49,14 +55,142 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
 }
 
+.itemBusy {
+  opacity: 0.72;
+}
+
+.itemMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.itemMain:disabled {
+  cursor: default;
+}
+
+.itemTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .itemTitle {
   font-size: 13px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .itemMeta {
   font-size: 12px;
   color: var(--color-muted);
+}
+
+.itemActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.iconBtn {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.dangerBtn {
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.renameInput {
+  width: 170px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid rgba(37, 99, 235, 0.20);
+  background: rgba(37, 99, 235, 0.06);
+  color: rgba(17, 24, 39, 0.7);
+  flex: 0 0 auto;
+}
+
+.state {
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(17, 24, 39, 0.16);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.stateTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.stateSub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.stateActions {
+  margin-top: 10px;
+}
+
+.error {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.errorTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.errorSub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(127, 29, 29, 0.9);
+}
+
+.errorActions {
+  margin-top: 10px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .footer {
@@ -65,4 +199,14 @@
   border-top: 1px solid var(--color-border);
   color: var(--color-muted);
   font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .renameInput {
+    width: 130px;
+  }
+
+  .iconBtn {
+    padding: 0 6px;
+  }
 }
